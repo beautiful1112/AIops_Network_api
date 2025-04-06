@@ -6,8 +6,9 @@ import numpy as np
 import io
 from typing import List, Dict, Optional
 import json
+import re
 
-app = FastAPI(title="Network Device Upload API")
+app = FastAPI(title="Network Device Configuration API")
 
 # Add CORS middleware
 app.add_middleware(
@@ -18,33 +19,47 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Define the expected columns and their default values
-REQUIRED_COLUMNS = {
-    'device_type': '',
-    'host': '',
-    'username': '',
-    'password': '',
-    'port': 22,
-    'secret': ''
-}
+def get_command_pairs(df):
+    """
+    Get all command and description column pairs from the DataFrame.
+    Returns a list of tuples (command_column, description_column) in order.
+    """
+    # Find all command and description columns with more flexible pattern
+    command_cols = []
+    desc_cols = []
+    
+    for col in df.columns:
+        col_lower = col.lower()
+        if 'command' in col_lower and any(str(i) in col_lower for i in range(10)):
+            command_cols.append(col)
+        elif 'description' in col_lower and any(str(i) in col_lower for i in range(10)):
+            desc_cols.append(col)
+    
+    # Sort them by the number in the column name
+    def get_number(col):
+        return int(''.join(filter(str.isdigit, col)))
+    
+    command_cols.sort(key=get_number)
+    desc_cols.sort(key=get_number)
+    
+    # Pair them up
+    return list(zip(command_cols, desc_cols))
 
 @app.post("/upload/excel")
 async def upload_excel(file: UploadFile = File(...)):
     """
-    Upload an Excel file containing network device information and convert it to JSON format.
-    
-    The Excel file should contain the following columns:
-    - device_type: Device type (e.g., cisco_ios, junos, etc.)
-    - host: IP address
-    - username: Username for authentication
-    - password: Password for authentication
+    Upload an Excel file containing network device information and inspection commands.
+    The Excel file should contain a single sheet with the following columns:
+    - vendor_device_type: Type of device (e.g., cisco_sw, cisco_fw)
+    - device_type: Device platform (e.g., Cisco_ios, Cisco_asa)
+    - ip_address: Device IP address
+    - username: Login username
+    - password: Login password
     - port: SSH port (default: 22)
-    - secret: Enable password (optional)
+    - command1, command2, command3, etc.: Commands to execute
+    - description1, description2, description3, etc.: Descriptions of the commands
     
-    Example Excel format:
-    | device_type | host         | username | password | port | secret |
-    |------------|--------------|----------|----------|------|---------|
-    | cisco_ios  | 192.168.1.1  | admin    | pass123  | 22   | enable  |
+    Note: You can have any number of command/description pairs.
     """
     if not file:
         raise HTTPException(
@@ -67,102 +82,77 @@ async def upload_excel(file: UploadFile = File(...)):
                 detail="File is empty"
             )
             
+        # Read the Excel file
         df = pd.read_excel(io.BytesIO(contents))
         
-        # Check if all required columns exist
-        missing_columns = [col for col in REQUIRED_COLUMNS.keys() if col not in df.columns]
-        if missing_columns:
+        # Validate required columns
+        required_base_columns = ['vendor_device_type', 'device_type', 'ip_address', 'username', 'password', 'port']
+        missing_base_columns = [col for col in required_base_columns if col not in df.columns]
+        if missing_base_columns:
             raise HTTPException(
                 status_code=400,
-                detail=f"Missing required columns: {', '.join(missing_columns)}"
+                detail=f"Missing required base columns: {', '.join(missing_base_columns)}"
             )
         
-        # Fill missing values with defaults
-        for col, default_value in REQUIRED_COLUMNS.items():
-            if col not in df.columns:
-                df[col] = default_value
-            # Replace NaN values with default values
-            df[col] = df[col].replace({np.nan: default_value})
+        # Get command and description pairs
+        command_pairs = get_command_pairs(df)
         
-        # Convert port to integer
-        df['port'] = pd.to_numeric(df['port'], errors='coerce').fillna(22).astype(int)
+        if not command_pairs:
+            raise HTTPException(
+                status_code=400,
+                detail="No command/description pairs found in the Excel file"
+            )
         
-        # Replace NaN values with empty strings for text fields
-        text_columns = ['device_type', 'host', 'username', 'password', 'secret']
-        for col in text_columns:
-            df[col] = df[col].replace({np.nan: ''})
+        # Process the data
+        result = []
         
-        # Convert DataFrame to list of dictionaries
-        devices = df.to_dict(orient='records')
-        
-        # Validate required fields
-        for i, device in enumerate(devices):
-            if not device['host'] or not device['username'] or not device['password']:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Row {i+1}: host, username, and password are required fields"
-                )
+        for _, row in df.iterrows():
+            # Create inspection commands list
+            inspection_commands = []
+            for cmd_col, desc_col in command_pairs:
+                # Only add if both command and description are not empty
+                if pd.notna(row[cmd_col]) and str(row[cmd_col]).strip() and \
+                   pd.notna(row[desc_col]) and str(row[desc_col]).strip():
+                    inspection_commands.append({
+                        "command": str(row[cmd_col]).strip(),
+                        "description": str(row[desc_col]).strip()
+                    })
+            
+            # Convert port to integer, default to 22 if not specified
+            try:
+                port = int(row['port']) if pd.notna(row['port']) else 22
+            except ValueError:
+                port = 22
+            
+            device_data = {
+                "vendor_device_type": str(row['vendor_device_type']).strip(),
+                "device_info": {
+                    "device_type": str(row['device_type']).strip(),
+                    "ip_address": str(row['ip_address']).strip(),
+                    "username": str(row['username']).strip(),
+                    "password": str(row['password']).strip(),
+                    "port": port
+                },
+                "inspection_commands": inspection_commands
+            }
+            result.append(device_data)
         
         return {
             "filename": file.filename,
-            "total_devices": len(devices),
-            "devices": devices
+            "total_devices": len(result),
+            "total_commands_per_device": len(command_pairs),
+            "devices": result
         }
+        
     except pd.errors.EmptyDataError:
         raise HTTPException(
             status_code=400,
             detail="The Excel file is empty or contains no data"
         )
-    except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error processing file: {str(e)}"
-        )
-
-@app.post("/upload/txt")
-async def upload_txt(file: UploadFile = File(...)):
-    """
-    Upload a TXT file containing network commands and return its parsed contents
-    
-    The text file should contain one command per line, for example:
-    show ip int bri
-    show running-config
-    show ip route table
-    etc.
-    """
-    if not file:
+    except ValueError as e:
         raise HTTPException(
             status_code=400,
-            detail="No file uploaded"
-        )
-
-    if not file.filename.endswith('.txt'):
-        raise HTTPException(
-            status_code=400,
-            detail="File must be a text file (.txt)"
-        )
-    
-    try:
-        contents = await file.read()
-        if not contents:
-            raise HTTPException(
-                status_code=400,
-                detail="File is empty"
-            )
-
-        # Decode and process the commands
-        text_content = contents.decode('utf-8').strip()
-        commands = [cmd.strip() for cmd in text_content.split('\n') if cmd.strip()]
-        
-        return {
-            "filename": file.filename,
-            "total_commands": len(commands),
-            "commands": commands
-        }
-    except UnicodeDecodeError:
-        raise HTTPException(
-            status_code=400,
-            detail="File must be a valid text file with UTF-8 encoding"
+            detail=f"Invalid port value: {str(e)}"
         )
     except Exception as e:
         raise HTTPException(
