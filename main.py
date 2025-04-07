@@ -49,17 +49,19 @@ def get_command_pairs(df):
 async def upload_excel(file: UploadFile = File(...)):
     """
     Upload an Excel file containing network device information and inspection commands.
-    The Excel file should contain a single sheet with the following columns:
+    The Excel file should contain two sheets:
+    
+    1. "Devices" sheet with columns:
     - vendor_device_type: Type of device (e.g., cisco_sw, cisco_fw)
     - device_type: Device platform (e.g., Cisco_ios, Cisco_asa)
     - ip_address: Device IP address
     - username: Login username
     - password: Login password
     - port: SSH port (default: 22)
-    - command1, command2, command3, etc.: Commands to execute
-    - description1, description2, description3, etc.: Descriptions of the commands
     
-    Note: You can have any number of command/description pairs.
+    2. "Commands" sheet with columns:
+    - device_type: Device platform (e.g., Cisco_ios, Cisco_asa)
+    - command: Command to execute
     """
     if not file:
         raise HTTPException(
@@ -82,65 +84,69 @@ async def upload_excel(file: UploadFile = File(...)):
                 detail="File is empty"
             )
             
-        # Read the Excel file
-        df = pd.read_excel(io.BytesIO(contents))
+        # Read both sheets
+        devices_df = pd.read_excel(io.BytesIO(contents), sheet_name='Devices')
+        commands_df = pd.read_excel(io.BytesIO(contents), sheet_name='Commands')
         
-        # Validate required columns
-        required_base_columns = ['vendor_device_type', 'device_type', 'ip_address', 'username', 'password', 'port']
-        missing_base_columns = [col for col in required_base_columns if col not in df.columns]
-        if missing_base_columns:
+        # Validate required columns in Devices sheet
+        required_device_columns = ['vendor_device_type', 'device_type', 'ip_address', 'username', 'password', 'port']
+        missing_device_columns = [col for col in required_device_columns if col not in devices_df.columns]
+        if missing_device_columns:
             raise HTTPException(
                 status_code=400,
-                detail=f"Missing required base columns: {', '.join(missing_base_columns)}"
+                detail=f"Missing required columns in Devices sheet: {', '.join(missing_device_columns)}"
             )
         
-        # Get command and description pairs
-        command_pairs = get_command_pairs(df)
-        
-        if not command_pairs:
+        # Validate required columns in Commands sheet
+        required_command_columns = ['device_type', 'command']
+        missing_command_columns = [col for col in required_command_columns if col not in commands_df.columns]
+        if missing_command_columns:
             raise HTTPException(
                 status_code=400,
-                detail="No command/description pairs found in the Excel file"
+                detail=f"Missing required columns in Commands sheet: {', '.join(missing_command_columns)}"
             )
         
         # Process the data
         result = []
         
-        for _, row in df.iterrows():
-            # Create inspection commands list
-            inspection_commands = []
-            for cmd_col, desc_col in command_pairs:
-                # Only add if both command and description are not empty
-                if pd.notna(row[cmd_col]) and str(row[cmd_col]).strip() and \
-                   pd.notna(row[desc_col]) and str(row[desc_col]).strip():
-                    inspection_commands.append({
-                        "command": str(row[cmd_col]).strip(),
-                        "description": str(row[desc_col]).strip()
-                    })
+        # Group commands by device_type
+        commands_by_type = commands_df.groupby('device_type')
+        
+        for _, device_row in devices_df.iterrows():
+            device_type = device_row['device_type']
+            
+            # Get commands for this device type
+            device_commands = []
+            if device_type in commands_by_type.groups:
+                commands = commands_by_type.get_group(device_type)
+                for _, cmd_row in commands.iterrows():
+                    if pd.notna(cmd_row['command']):
+                        device_commands.append({
+                            "command": str(cmd_row['command']).strip()
+                        })
             
             # Convert port to integer, default to 22 if not specified
             try:
-                port = int(row['port']) if pd.notna(row['port']) else 22
+                port = int(device_row['port']) if pd.notna(device_row['port']) else 22
             except ValueError:
                 port = 22
             
             device_data = {
-                "vendor_device_type": str(row['vendor_device_type']).strip(),
+                "vendor_device_type": str(device_row['vendor_device_type']).strip(),
                 "device_info": {
-                    "device_type": str(row['device_type']).strip(),
-                    "ip_address": str(row['ip_address']).strip(),
-                    "username": str(row['username']).strip(),
-                    "password": str(row['password']).strip(),
+                    "device_type": str(device_row['device_type']).strip(),
+                    "ip_address": str(device_row['ip_address']).strip(),
+                    "username": str(device_row['username']).strip(),
+                    "password": str(device_row['password']).strip(),
                     "port": port
                 },
-                "inspection_commands": inspection_commands
+                "inspection_commands": device_commands
             }
             result.append(device_data)
         
         return {
             "filename": file.filename,
             "total_devices": len(result),
-            "total_commands_per_device": len(command_pairs),
             "devices": result
         }
         
