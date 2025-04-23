@@ -11,22 +11,11 @@ logging.getLogger('pyats').setLevel(logging.INFO)
 
 class DeviceManager:
     def __init__(self):
-        self.device_types = {
-            'Cisco_ios': 'ios',
-            'Cisco_iosxe': 'iosxe',
-            'Cisco_asa': 'asa',
-            'Cisco_nxos': 'nxos',
-            'Juniper': 'junos'
-        }
+        pass
     
     def create_testbed(self, device_info: Dict) -> Dict:
         """Create a pyATS testbed dictionary for the device"""
-        device_type = self.device_types.get(device_info['device_type'])
-        if not device_type:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Unsupported device type: {device_info['device_type']}"
-            )
+        device_type = device_info['device_type']
         
         testbed = {
             'devices': {

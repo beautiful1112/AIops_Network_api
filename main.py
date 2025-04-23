@@ -179,7 +179,7 @@ async def execute_commands(device_data: Dict):
     {
         "vendor_device_type": "cisco_sw",
         "device_info": {
-            "device_type": "Cisco_ios",
+            "device_type": "ios",  # Direct device type: ios, iosxe, asa, nxos, junos
             "ip_address": "192.168.1.1",
             "username": "admin",
             "password": "cisco123",
