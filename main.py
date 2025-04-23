@@ -7,6 +7,7 @@ import io
 from typing import List, Dict, Optional
 import json
 import re
+from device_manager import DeviceManager
 
 app = FastAPI(title="Network Device Configuration API")
 
@@ -18,6 +19,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Initialize device manager
+device_manager = DeviceManager()
 
 def get_command_pairs(df):
     """
@@ -164,6 +168,38 @@ async def upload_excel(file: UploadFile = File(...)):
         raise HTTPException(
             status_code=500,
             detail=f"Error processing file: {str(e)}"
+        )
+
+@app.post("/execute/commands")
+async def execute_commands(device_data: Dict):
+    """
+    Execute commands on network devices and return responses.
+    
+    Expected JSON format:
+    {
+        "vendor_device_type": "cisco_sw",
+        "device_info": {
+            "device_type": "Cisco_ios",
+            "ip_address": "192.168.1.1",
+            "username": "admin",
+            "password": "cisco123",
+            "port": 22
+        },
+        "inspection_commands": [
+            {"command": "show version"},
+            {"command": "show running-config"}
+        ]
+    }
+    """
+    try:
+        # Process device data and execute commands
+        result = device_manager.process_device_data(device_data)
+        return result
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing device data: {str(e)}"
         )
 
 if __name__ == "__main__":
