@@ -93,7 +93,7 @@ async def upload_excel(file: UploadFile = File(...)):
         commands_df = pd.read_excel(io.BytesIO(contents), sheet_name='Commands')
         
         # Validate required columns in Devices sheet
-        required_device_columns = ['vendor_device_type', 'device_type', 'ip_address', 'username', 'password', 'port']
+        required_device_columns = ['vendor_device_type', 'os_type', 'ip_address', 'username', 'password', 'port']
         missing_device_columns = [col for col in required_device_columns if col not in devices_df.columns]
         if missing_device_columns:
             raise HTTPException(
@@ -102,7 +102,7 @@ async def upload_excel(file: UploadFile = File(...)):
             )
         
         # Validate required columns in Commands sheet
-        required_command_columns = ['device_type', 'command']
+        required_command_columns = ['os_type', 'command']
         missing_command_columns = [col for col in required_command_columns if col not in commands_df.columns]
         if missing_command_columns:
             raise HTTPException(
@@ -114,15 +114,15 @@ async def upload_excel(file: UploadFile = File(...)):
         result = []
         
         # Group commands by device_type
-        commands_by_type = commands_df.groupby('device_type')
+        commands_by_type = commands_df.groupby('os_type')
         
         for _, device_row in devices_df.iterrows():
-            device_type = device_row['device_type']
+            os_type = device_row['os_type']
             
             # Get commands for this device type
             device_commands = []
-            if device_type in commands_by_type.groups:
-                commands = commands_by_type.get_group(device_type)
+            if os_type in commands_by_type.groups:
+                commands = commands_by_type.get_group(os_type)
                 for _, cmd_row in commands.iterrows():
                     if pd.notna(cmd_row['command']):
                         device_commands.append({
@@ -138,7 +138,7 @@ async def upload_excel(file: UploadFile = File(...)):
             device_data = {
                 "vendor_device_type": str(device_row['vendor_device_type']).strip(),
                 "device_info": {
-                    "device_type": str(device_row['device_type']).strip(),
+                    "os_type": str(device_row['os_type']).strip(),
                     "ip_address": str(device_row['ip_address']).strip(),
                     "username": str(device_row['username']).strip(),
                     "password": str(device_row['password']).strip(),
@@ -170,16 +170,16 @@ async def upload_excel(file: UploadFile = File(...)):
             detail=f"Error processing file: {str(e)}"
         )
 
-@app.post("/execute/commands")
-async def execute_commands(device_data: Dict):
+@app.post("/execute/cisco/commands")
+async def execute_cisco_commands(device_data: Dict):
     """
-    Execute commands on network devices and return responses.
+    Execute commands on Cisco network devices and return responses.
     
     Expected JSON format:
     {
         "vendor_device_type": "cisco_sw",
         "device_info": {
-            "device_type": "ios",  # Direct device type: ios, iosxe, asa, nxos, junos
+            "os_type": "ios",  # Direct device type: ios, iosxe, asa, nxos, junos
             "ip_address": "192.168.1.1",
             "username": "admin",
             "password": "cisco123",
@@ -200,6 +200,48 @@ async def execute_commands(device_data: Dict):
         raise HTTPException(
             status_code=500,
             detail=f"Error processing device data: {str(e)}"
+        )
+
+@app.post("/execute/huawei/commands")
+async def execute_huawei_commands(device_data: Dict):
+    """
+    Execute commands on Huawei network devices and return responses.
+    
+    Expected JSON format:
+    {
+        "vendor_device_type": "huawei_sw",
+        "device_info": {
+            "os_type": "huawei",  # or "vrp"
+            "ip_address": "192.168.1.1",
+            "username": "admin",
+            "password": "huawei123",
+            "port": 22
+        },
+        "inspection_commands": [
+            {"command": "display version"},
+            {"command": "display current-configuration"}
+        ]
+    }
+    """
+    try:
+        # Add Huawei specific handling
+        device_info = device_data['device_info']
+        
+        # Ensure we're using the correct OS type
+        if device_info['os_type'].lower() not in ['huawei', 'vrp']:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid OS type for Huawei device. Use 'huawei' or 'vrp'"
+            )
+        
+        # Process device data and execute commands
+        result = device_manager.process_device_data(device_data)
+        return result
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing Huawei device data: {str(e)}"
         )
 
 if __name__ == "__main__":

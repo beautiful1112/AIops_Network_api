@@ -15,25 +15,31 @@ class DeviceManager:
     
     def create_testbed(self, device_info: Dict) -> Dict:
         """Create a pyATS testbed dictionary for the device"""
-        device_type = device_info['device_type']
+        os_type = device_info['os_type']
         
         testbed = {
             'devices': {
                 device_info['ip_address']: {
-                    'type': device_type,
+                    'type': os_type,
+                    'os': os_type,
+                    'platform': os_type,
                     'connections': {
                         'cli': {
                             'protocol': 'ssh',
                             'ip': device_info['ip_address'],
                             'port': device_info.get('port', 22),
                             'username': device_info['username'],
-                            'password': device_info['password']
+                            'password': device_info['password'],
+                            'ssh_options': '-o KexAlgorithms=diffie-hellman-group-exchange-sha1,diffie-hellman-group14-sha1 -o HostKeyAlgorithms=ssh-rsa -o Ciphers=aes128-ctr,aes192-ctr,aes256-ctr'
                         }
                     },
                     'credentials': {
                         'default': {
                             'username': device_info['username'],
                             'password': device_info['password']
+                        },
+                        'enable': {
+                            'password': device_info.get('password', '')
                         }
                     }
                 }
@@ -52,6 +58,7 @@ class DeviceManager:
         try:
             # Create testbed
             testbed_dict = self.create_testbed(device_info)
+            logging.info(f"Created testbed configuration: {json.dumps(testbed_dict, indent=2)}")
             
             # Load testbed
             testbed = loader.load(testbed_dict)
@@ -60,11 +67,13 @@ class DeviceManager:
             device = testbed.devices[device_info['ip_address']]
             
             # Connect to device
-            device.connect(learn_hostname=True, log_stdout=False)
+            logging.info(f"Attempting to connect to device {device_info['ip_address']}")
+            device.connect(learn_hostname=True, log_stdout=True)  # Enable logging for debugging
             
             return device
             
         except Exception as e:
+            logging.error(f"Failed to connect to device: {str(e)}")
             raise HTTPException(
                 status_code=500,
                 detail=f"Failed to connect to device: {str(e)}"
@@ -75,6 +84,11 @@ class DeviceManager:
         try:
             device = self.connect_to_device(device_info)
             responses = []
+            
+            # Handle Huawei specific commands
+            if 'huawei' in device_info['os_type'].lower():
+                # Enter system view for Huawei devices
+                device.execute('system-view')
             
             for command in commands:
                 try:
