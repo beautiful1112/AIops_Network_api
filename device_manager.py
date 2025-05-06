@@ -123,12 +123,39 @@ class DeviceManager:
     def execute_commands(self, device_info: Dict, commands: List[str]) -> Dict:
         """Execute commands on device and return responses"""
         try:
-            # Check if device is Huawei
-            is_huawei = any(os_type in device_info['os_type'].lower() for os_type in ['huawei', 'vrp', 'vrpv8'])
+            # Check device type
+            os_type = device_info['os_type'].lower()
+            is_huawei = any(huawei_type in os_type for huawei_type in ['huawei', 'vrp', 'vrpv8'])
+            is_juniper = any(juniper_type in os_type for juniper_type in ['junos', 'junos-evo'])
             
             if is_huawei:
                 # Use Netmiko for Huawei devices
                 device = self.connect_huawei_device(device_info)
+                responses = []
+                
+                for command in commands:
+                    try:
+                        # Execute command
+                        output = device.send_command(command)
+                        
+                        responses.append({
+                            "command": command,
+                            "status": "success",
+                            "output": output
+                        })
+                    except Exception as e:
+                        responses.append({
+                            "command": command,
+                            "status": "error",
+                            "error": str(e)
+                        })
+                
+                # Disconnect from device
+                device.disconnect()
+                
+            elif is_juniper:
+                # Use Netmiko for Juniper devices
+                device = self.connect_juniper_device(device_info)
                 responses = []
                 
                 for command in commands:
@@ -214,4 +241,45 @@ class DeviceManager:
             raise HTTPException(
                 status_code=400,
                 detail=f"Invalid device data format: {str(e)}"
+            )
+
+    def connect_juniper_device(self, device_info: Dict) -> ConnectHandler:
+        """Establish connection to Juniper device using Netmiko"""
+        try:
+            # Map Juniper OS types to Netmiko device types
+            os_type = device_info['os_type'].lower()
+            if 'junos-evo' in os_type:
+                device_type = 'juniper_junos_evo'
+            else:
+                device_type = 'juniper_junos'
+
+            # Create Netmiko connection parameters
+            netmiko_params = {
+                'device_type': device_type,
+                'host': device_info['ip_address'],
+                'username': device_info['username'],
+                'password': device_info['password'],
+                'port': device_info.get('port', 22),
+                'timeout': 30,
+                'session_log': f"/tmp/{device_info['ip_address']}-netmiko.log"
+            }
+
+            # Establish connection
+            connection = ConnectHandler(**netmiko_params)
+            return connection
+
+        except NetMikoTimeoutException:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Connection timed out to device {device_info['ip_address']}"
+            )
+        except NetMikoAuthenticationException:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Authentication failed for device {device_info['ip_address']}"
+            )
+        except Exception as e:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to connect to Juniper device: {str(e)}"
             ) 

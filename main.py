@@ -244,6 +244,48 @@ async def execute_huawei_commands(device_data: Dict):
             detail=f"Error processing Huawei device data: {str(e)}"
         )
 
+@app.post("/execute/juniper/commands")
+async def execute_juniper_commands(device_data: Dict):
+    """
+    Execute commands on Juniper network devices and return responses.
+    
+    Expected JSON format:
+    {
+        "vendor_device_type": "juniper_sw",
+        "device_info": {
+            "os_type": "junos",  # or "junos-evo"
+            "ip_address": "192.168.1.1",
+            "username": "admin",
+            "password": "juniper123",
+            "port": 22
+        },
+        "inspection_commands": [
+            {"command": "show version"},
+            {"command": "show configuration"}
+        ]
+    }
+    """
+    try:
+        # Add Juniper specific handling
+        device_info = device_data['device_info']
+        
+        # Ensure we're using the correct OS type
+        if device_info['os_type'].lower() not in ['junos', 'junos-evo']:
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid OS type for Juniper device. Use 'junos' or 'junos-evo'"
+            )
+        
+        # Process device data and execute commands
+        result = device_manager.process_device_data(device_data)
+        return result
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing Juniper device data: {str(e)}"
+        )
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000) 
