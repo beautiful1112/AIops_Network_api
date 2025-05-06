@@ -179,7 +179,7 @@ async def execute_cisco_commands(device_data: Dict):
     {
         "vendor_device_type": "cisco_sw",
         "device_info": {
-            "os_type": "ios",  # Direct device type: ios, iosxe, asa, nxos, junos
+            "os_type": "ios",  # Direct device type: ios, iosxe, asa, nxos
             "ip_address": "192.168.1.1",
             "username": "admin",
             "password": "cisco123",
@@ -211,7 +211,7 @@ async def execute_huawei_commands(device_data: Dict):
     {
         "vendor_device_type": "huawei_sw",
         "device_info": {
-            "os_type": "huawei",  # or "vrp"
+            "os_type": "vrpv8",  # or "vrp", "huawei"
             "ip_address": "192.168.1.1",
             "username": "admin",
             "password": "huawei123",
@@ -228,10 +228,10 @@ async def execute_huawei_commands(device_data: Dict):
         device_info = device_data['device_info']
         
         # Ensure we're using the correct OS type
-        if device_info['os_type'].lower() not in ['huawei', 'vrp']:
+        if device_info['os_type'].lower() not in ['huawei', 'vrp', 'vrpv8']:
             raise HTTPException(
                 status_code=400,
-                detail="Invalid OS type for Huawei device. Use 'huawei' or 'vrp'"
+                detail="Invalid OS type for Huawei device. Use 'huawei', 'vrp', or 'vrpv8'"
             )
         
         # Process device data and execute commands
